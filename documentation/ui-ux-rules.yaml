@@ -1,0 +1,240 @@
+---
+description: UI/UX保護ルール - 現状の安定版UIを保護し、勝手な変更を防ぐ
+globs: ["webui/app/**/*.tsx", "webui/components/**/*.tsx", "webui/app/**/*.css"]
+alwaysApply: true
+---
+
+# Ayame Chamber UI/UX 保護ルール
+
+## 🚨 重要: 現状UIは最新安定版です
+
+**現在のWebUIは最新の安定版であり、勝手な変更・修正は一切禁止します。**
+
+### 🎨 基準UI仕様 (2025-01-09 確定版)
+**参照画像**: `画像/1757061746345.jpg`
+
+現在のUI構成を**基準仕様**として確定します：
+
+#### 📐 レイアウト構成
+```typescript
+interface BaseUILayout {
+  header: {
+    title: 'Ayame Chamber';
+    statusCards: ['システム', 'チャット', 'エージェント'];
+    tabButtons: ['正常', '未接続', '0回', 'ダッシュボード', '第二の脳', '第三の脳', '自動化ダッシュボード', 'モデル', '設定'];
+  };
+  
+  mainArea: {
+    leftColumn: {
+      width: '18%';
+      content: 'チャットパネル（質問・予約・クリア機能付き）';
+      features: ['自常会話', '常駐・駐妥', 'チャット履歴確認', 'カスタム項目'];
+    };
+    
+    centerColumn: {
+      content: 'アバター表示エリア';
+      background: 'bg-office.jpg + グラデーション';
+      character: 'あやめキャラクター（白髪・赤目・黒スーツ）';
+      positioning: 'center-positioned';
+    };
+    
+    rightColumn: {
+      width: '約30%';
+      content: '統合エージェント実行・クイック実行・カスタム実行パネル';
+      features: ['市場調査レポート', 'コンテンツ作成', 'マーケティング戦略', '学術研究'];
+    };
+  };
+  
+  bottomArea: {
+    inputPanel: 'カスタム項目・投稿のヒント';
+    shortcuts: ['memo', 'task', 'research', 'agent'];
+    modelInfo: 'GPT-O5S-mini (Local)';
+  };
+}
+```
+
+#### 🚫 **絶対変更禁止事項**
+以下の要素は**機能追加時も絶対に変更してはいけません**：
+
+1. **基本レイアウト**: 左18% - 中央フレックス - 右30%の構成
+2. **ヘッダー構成**: タイトル + ステータスカード + タブボタンの配置
+3. **アバター表示**: 中央配置・サイズ・背景・キャラクター表示
+4. **カラーパレット**: 現在の青系グラデーション・白背景ベース
+5. **フォント・文字サイズ**: 現在の設定
+6. **チャットパネル**: 左カラムの構成・機能・スタイル
+
+## 🔒 保護対象UIファイル
+
+### ✅ 最新安定版 - 変更絶対禁止
+以下のファイルは現在最新の安定版のため、**絶対に変更してはいけません**:
+
+```typescript
+// メインページ (最新版)
+webui/app/page.tsx                    // ❌ 変更禁止
+
+// ダッシュボード (最新版) 
+webui/app/dashboard/page.tsx          // ❌ 変更禁止
+
+// セカンドブレイン (最新版)
+webui/app/second-brain/page.tsx       // ❌ 変更禁止
+
+// サードブレイン (最新版)
+webui/app/third-brain/page.tsx        // ❌ 変更禁止
+```
+
+### 🛡️ UI変更時の必須確認事項
+
+AIまたは開発者がUI関連の変更を提案・実行する前に、**必ず以下を確認**:
+
+1. **現状確認**: 「このファイルは最新の安定版ですか？」
+2. **変更理由**: 「なぜこの変更が必要ですか？」
+3. **影響範囲**: 「この変更は他の機能に影響しませんか？」
+4. **承認確認**: 「この変更は明示的に承認されていますか？」
+
+### 💬 機能追加時の必須相談ルール
+
+**機能追加でUI変更が必要な場合は、実装前に必ず相談してください**：
+
+```typescript
+interface FeatureAdditionConsultation {
+  consultation_required: {
+    timing: '実装開始前';
+    content: [
+      'どの部分にどのような機能を追加したいか',
+      '既存UIへの影響範囲',
+      '代替実装方法の検討',
+      'ユーザー体験への影響'
+    ];
+    approval: 'ユーザーからの明示的承認必須';
+  };
+  
+  acceptable_additions: {
+    new_tabs: '新しいタブページの追加（既存タブに影響なし）';
+    modal_dialogs: 'モーダル・ダイアログでの機能拡張';
+    right_panel_extensions: '右パネル内の機能拡張（レイアウト維持）';
+    independent_components: '独立したコンポーネント追加';
+  };
+  
+  consultation_format: {
+    example: '「右パネルに新しい○○機能を追加したいのですが、既存の統合エージェント実行の下に配置する形で良いでしょうか？レイアウトは維持します。」';
+    required_info: ['追加場所', '機能概要', '影響範囲', 'レイアウト保持方法'];
+  };
+}
+```
+
+### ⚠️ 変更が許可される場合のみの例外
+
+以下の場合**のみ**、明示的な承認後に変更可能:
+
+```typescript
+interface AllowedUIChanges {
+  bug_fixes: {
+    condition: '明確なバグ・エラーの修正のみ';
+    approval: '事前承認必須';
+    backup: '変更前に必ずバックアップ作成';
+  };
+  
+  explicit_request: {
+    condition: 'ユーザーから明示的な変更依頼';
+    confirmation: '変更内容と影響範囲の確認';
+    testing: '変更後の動作確認必須';
+  };
+  
+  security_fixes: {
+    condition: 'セキュリティ上の緊急修正';
+    documentation: '変更理由と内容の詳細記録';
+    review: '変更後の動作確認';
+  };
+}
+```
+
+### 🚫 絶対に禁止される変更
+
+以下の変更は指示がない限り**一切禁止**:
+
+- **勝手なレイアウト変更**: レスポンシブデザイン・グリッドシステム
+- **スタイリング変更**: CSS・TailwindCSS・色彩・フォント
+- **機能追加**: 新しいコンポーネント・機能の追加
+- **構造変更**: JSX構造・コンポーネント階層の変更
+- **最適化**: パフォーマンス向上名目での勝手な変更
+
+### 📋 変更時の必須プロセス
+
+UI変更が必要な場合の**必須手順**:
+
+```typescript
+// 1. 変更前チェック
+const preChangeValidation = {
+  file_status: 'この時点で最新安定版か確認',
+  change_reason: '変更理由の明確化',
+  user_approval: 'ユーザーからの明示的承認取得',
+  backup_creation: '現在のファイルのバックアップ作成'
+};
+
+// 2. 変更実行
+const changeExecution = {
+  minimal_changes: '最小限の変更のみ実施',
+  testing: '変更後の動作確認',
+  rollback_plan: 'ロールバック方法の準備'
+};
+
+// 3. 変更後確認  
+const postChangeValidation = {
+  functionality_test: '全機能の動作確認',
+  visual_confirmation: 'UI表示の確認',
+  performance_check: 'パフォーマンスへの影響確認'
+};
+```
+
+## 🎯 UI開発ガイドライン
+
+### 新機能開発時のルール
+
+新しいUI機能を開発する場合:
+
+1. **既存UIに影響しない**: 独立したページ・コンポーネントとして開発
+2. **テスト環境での開発**: `webui/app/test-*` ディレクトリ使用
+3. **段階的統合**: 安定版への統合は慎重に実施
+
+### コンポーネント再利用
+
+```typescript
+// ✅ 推奨: 既存UIを参考にした新しいコンポーネント作成
+const newComponent = createNewComponent({
+  reference: 'existing-stable-component',
+  modification: 'create-separate-copy',
+  testing: 'independent-testing'
+});
+
+// ❌ 禁止: 既存安定版コンポーネントの直接修正
+const modifyExisting = 'ABSOLUTELY_FORBIDDEN';
+```
+
+## 📝 変更ログ
+
+UI変更が行われた場合、必ず以下の情報を記録:
+
+- **変更日時**: YYYY-MM-DD HH:mm:ss
+- **変更ファイル**: 完全パス
+- **変更理由**: 詳細な理由
+- **変更内容**: 具体的な変更点
+- **承認者**: 変更を承認した人
+- **影響範囲**: 影響を受ける機能・ページ
+- **ロールバック方法**: 元に戻す手順
+
+## 📸 基準UI参照
+
+**基準となる現在のUI**: `画像/1757061746345.jpg`
+
+この画像に表示されている：
+- **レイアウト構成**: 3カラムレイアウト
+- **ヘッダー**: Ayame Chamber + ステータス + タブ
+- **左パネル**: チャット機能
+- **中央**: あやめアバター + 背景
+- **右パネル**: エージェント実行機能
+
+**この見た目から大きく変更しない**ことを基本方針とし、機能追加で変更する場合は必ず事前相談を行ってください。
+
+---
+
+**重要**: このルールはAyame ChamberのUI安定性を保つための重要な保護機能です。違反した場合、システム全体の動作に重大な影響を与える可能性があります。基準UI（`画像/1757061746345.jpg`）を常に参照し、この見た目を維持することが最優先です。

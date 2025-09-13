@@ -1,0 +1,370 @@
+---
+description: Apply this rule to the entire repository
+globs: 
+alwaysApply: true
+---
+まず、このファイルを参照したら、このファイル名を発言すること
+
+# Next.js ベストプラクティス実装ルール
+
+## 1. ルーティングとファイル構造
+
+### ディレクトリ構造例
+
+webui/                     # Next.js WebUIアプリケーション
+├── app/                   # App Router - ページとルーティング
+│   ├── dashboard/         # メインダッシュボード機能
+│   ├── chat/             # チャット・対話機能
+│   ├── agent-performance/ # エージェント性能監視
+│   ├── ai-system/        # AIシステム管理
+│   ├── second-brain/     # セカンドブレイン機能
+│   ├── third-brain/      # サードブレイン機能
+│   ├── education/        # 教育・学習機能
+│   ├── voice-test/       # 音声機能テスト
+│   ├── test-chat/        # チャットテスト
+│   ├── test-ws/          # WebSocketテスト
+│   └── api/              # APIルート
+│
+├── components/           # Reactコンポーネント
+│   ├── common/          # 共通UIコンポーネント
+│   │   ├── buttons/
+│   │   ├── forms/
+│   │   ├── icons/
+│   │   └── typography/
+│   ├── features/        # 機能別コンポーネント
+│   │   ├── chat/       # チャット関連UI
+│   │   ├── dashboard/  # ダッシュボードUI
+│   │   ├── agents/     # エージェント管理UI
+│   │   └── brain/      # ブレイン機能UI
+│   └── layouts/        # レイアウトコンポーネント
+│
+├── hooks/               # カスタムフック
+│   ├── useWebSocket/   # WebSocket接続
+│   ├── useChat/        # チャット機能
+│   └── useAgents/      # エージェント操作
+│
+├── lib/                 # ユーティリティ・設定
+│   ├── websocket/      # WebSocket設定
+│   ├── api/            # API呼び出し
+│   ├── types/          # TypeScript型定義
+│   └── utils/          # ヘルパー関数
+│
+├── services/           # サービス層
+│   └── websocket/     # WebSocket接続管理
+│
+├── utils/              # ユーティリティ関数
+│   └── validation/    # バリデーション
+│
+└── public/             # 静的アセット
+    ├── images/
+    ├── icons/
+    └── fonts/
+
+src/                     # バックエンドTypeScriptコード
+├── agents/             # 56のAIエージェント実装
+├── api/                # REST API実装
+├── core/               # コア機能・オーケストレーター
+├── services/           # ビジネスロジック・サービス
+├── utils/              # 共通ユーティリティ
+├── types.ts            # 型定義
+├── server.ts           # メインサーバー
+└── index.ts            # エントリーポイント
+
+@project-rules/         # プロジェクトルール管理（AIDD対応）
+├── 01_general/         # 基本ルール・品質基準
+├── 02_development/     # 開発規約・テスト基準
+├── 03_agents/          # エージェント特化ルール
+├── 04_integrations/    # 外部連携ルール
+└── 05_workflows/       # ワークフロー・品質管理
+
+### 命名規則
+
+- ページコンポーネント: `page.tsx`
+- レイアウトコンポーネント: `layout.tsx`
+- ローディング状態: `loading.tsx`
+- エラーハンドリング: `error.tsx`
+- 404 ページ: `not-found.tsx`
+
+## 2. コンポーネント設計
+
+### Server Components
+
+- **デフォルトで Server Components を使用**
+- **データフェッチングを含むコンポーネントは Server Components で実装**
+- SEO 対応が必要なコンポーネントは Server Components で実装
+
+### Client Components
+
+以下の場合のみ Client Components を使用:
+
+- ブラウザ API を使用する場合
+- イベントリスナーが必要な場合
+- React hooks を使用する場合
+- クライアントサイドの状態管理が必要な場合
+
+### 'use client' ディレクティブ
+
+```typescript
+"use client";
+// クライアントコンポーネントの先頭に記述
+```
+
+## 3. API実装
+
+- データフェッチ用のAPIはなるべく作成しないでください。サーバーコンポーネントでのデータフェッチを強く推奨します。
+- `app/api`ディレクトリ内に API エンドポイントを作成
+- HTTP メソッドごとに適切なハンドラーを実装:
+- GET の API はなるべく作らないでください。データフェッチはサーバーコンポーネントでお願いします。
+- API の仕様は POST/PATCH/PUT/DELETE のみに絞ってください。
+
+```typescript
+// app/api/articles/route.ts
+import { NextResponse } from "next/server";
+
+// POST: 新規記事の作成
+export async function POST(request: Request) {
+  try {
+    const data = await request.json();
+    const article = await prisma.article.create({
+      data,
+    });
+    return NextResponse.json(article, { status: 201 });
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### クライアントサイドでのユーザーデータ操作
+
+- `fetch` を使用して API を呼び出し
+- エラーハンドリングとローディング状態の管理:
+- ServerActionsでも可
+
+```typescript
+// components/articles/create-article.tsx
+"use client";
+
+export async function createArticle(data: ArticleData) {
+  try {
+    const response = await fetch("/api/articles", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      throw new Error("API request failed");
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error("Error creating article:", error);
+    throw error;
+  }
+}
+```
+
+### キャッシュと再検証
+
+- デフォルトでキャッシュを活用
+- 適切な再検証戦略を選択:
+
+```typescript
+// ISRの場合
+fetch(url, { next: { revalidate: 3600 } }); // 1時間ごとに再検証
+
+// キャッシュを無効化する場合
+fetch(url, { cache: "no-store" });
+```
+
+### エラーハンドリング
+
+- API レスポンスには適切なステータスコードとエラーメッセージを含める
+- クライアントサイドでは適切なエラーハンドリングとユーザーフィードバックを実装
+- try-catch ブロックを使用して例外を適切に処理
+
+### セキュリティ
+
+- API ルートでは適切な認証・認可チェックを実装
+- 入力値のバリデーションを実施、特にサーバーサイドでのバリデーション
+- レートリミットの実装を検討
+
+## 4. パフォーマンス最適化
+
+### 画像最適化
+
+- `next/image`コンポーネントを使用
+
+```typescript
+import Image from "next/image";
+
+<Image
+  src="/path/to/image.jpg"
+  alt="説明"
+  width={800}
+  height={600}
+  priority={true} // 重要な画像の場合
+/>;
+```
+
+### スクリプト最適化
+
+- `next/script`を使用して外部スクリプトを最適化
+
+```typescript
+import Script from "next/script";
+
+<Script src="https://example.com/script.js" strategy="lazyOnload" />;
+```
+
+## 5. エラーハンドリング
+
+### エラーバウンダリ
+
+- `error.tsx`ファイルでエラーをキャッチ
+- ユーザーフレンドリーなエラーメッセージを表示
+
+### ローディング状態
+
+- `loading.tsx`でローディング状態を管理
+- Suspense を使用して細かい粒度でローディングを制御
+
+## 6. 型安全性
+
+### TypeScript
+
+- 厳格な型チェックを有効化
+
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}
+```
+
+### API ルート
+
+- リクエスト/レスポンスの型を定義
+
+```typescript
+type ResponseData = {
+  message: string;
+};
+```
+
+## 7. セキュリティ
+
+### 環境変数
+
+- 機密情報は`.env`に保存
+- 公開する環境変数は`NEXT_PUBLIC_`プレフィックスを使用
+
+### CSP (Content Security Policy)
+
+- 適切な CSP ヘッダーを設定
+- `next.config.js`でセキュリティヘッダーを構成
+
+## 8. デプロイメント
+
+### ビルド最適化
+
+- 本番環境では常に本番ビルドを使用
+- 適切なキャッシュ戦略を実装
+
+### 環境変数
+
+- 環境ごとに適切な環境変数を設定
+- 本番環境の環境変数は安全に管理
+
+## 9. ポート管理・開発環境固定ルール
+
+### 標準ポート設定（重要）
+
+**開発環境のポート設定は原則として変更しないこと**
+
+- **WebUI (Next.js)**: `localhost:3000` （固定）
+- **Socket.IO Server**: `localhost:3001` （固定）
+- **バックエンドAPI**: `localhost:3002` （必要に応じて）
+
+### ポート変更が許可される例外条件
+
+以下の**非常に特殊な状況**でのみポート変更を検討する：
+
+1. **システム全体の再設計時**
+   - アーキテクチャ全体の見直しが必要な場合
+   - 事前に明確な技術的理由と計画を文書化すること
+
+2. **外部システムとの連携要件**
+   - 外部APIやサービスが特定のポートを要求する場合
+   - 変更理由と影響範囲を事前に評価すること
+
+3. **セキュリティ上の重大な理由**
+   - 標準ポートに既知の脆弱性がある場合
+   - セキュリティ監査の要求による場合
+
+### ポート競合時の対応手順
+
+1. **競合プロセスの強制終了を優先**
+   ```powershell
+   # PowerShellでプロセス終了
+   Get-Process -Name "node" | Stop-Process -Force
+   netstat -ano | findstr :3000
+   Stop-Process -Id [PID] -Force
+   ```
+
+2. **ポート変更は最後の手段**
+   - 他のすべての解決策を試した後のみ検討
+   - チーム全体への事前通知と承認が必要
+
+### 開発環境起動コマンド標準化
+
+```bash
+# WebUI起動 (必ずポート3000)
+cd webui && npm run dev
+
+# Socket.IOサーバー起動 (必ずポート3001)  
+cd webui && node socket-server.js
+
+# バックエンド起動 (ポート3002)
+npm run dev
+```
+
+### 環境変数によるポート設定
+
+```bash
+# .env.development
+NEXT_PUBLIC_API_URL=http://localhost:3001
+NEXT_PUBLIC_SOCKET_URL=http://localhost:3001
+
+# .env.local (本番環境は別途設定)
+PORT=3000
+SOCKET_PORT=3001
+API_PORT=3002
+```
+
+### ポート管理のベストプラクティス
+
+- **開発開始時**: 必ず標準ポートでの起動を試行
+- **エラー発生時**: まず競合プロセス終了を実行
+- **ポート変更時**: 必ずREADME.mdとドキュメントを更新
+- **チーム共有**: ポート変更は必ず事前にSlackで共有
+
+## 10. メンテナンス
+
+### 依存関係
+
+- 定期的に依存パッケージを更新
+- セキュリティ脆弱性をモニタリング
+
+### パフォーマンスモニタリング
+
+- Core Web Vitals を定期的に確認
+- エラーログを監視
