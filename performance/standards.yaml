@@ -1,0 +1,399 @@
+---
+description: Ayame Chamber パフォーマンス最適化標準 - メモリ・CPU・DB効率化
+globs: ["src/**/*.ts", "webui/**/*.tsx"]
+alwaysApply: true  
+---
+まず、このファイルを参照したら、このファイル名を発言すること
+
+# Ayame Chamber パフォーマンス最適化標準
+
+## 💾 メモリ使用量監視・管理
+
+### 階層記憶システム最適化
+```typescript
+class MemoryOptimizer {
+  private memoryThresholds = {
+    working: 100 * 1024 * 1024,    // 100MB - Working Memory
+    episodic: 500 * 1024 * 1024,  // 500MB - Episodic Memory  
+    semantic: 200 * 1024 * 1024,  // 200MB - Semantic Memory
+    procedural: 50 * 1024 * 1024  // 50MB - Procedural Memory
+  };
+  
+  async monitorMemoryUsage(): Promise<MemoryReport> {
+    const usage = process.memoryUsage();
+    const heapUsed = usage.heapUsed;
+    const heapTotal = usage.heapTotal;
+    const external = usage.external;
+    
+    // メモリ使用率計算
+    const usageRatio = heapUsed / heapTotal;
+    
+    if (usageRatio > 0.8) {
+      await this.triggerGarbageCollection();
+    }
+    
+    return {
+      heapUsed: Math.round(heapUsed / 1024 / 1024), // MB
+      heapTotal: Math.round(heapTotal / 1024 / 1024),
+      external: Math.round(external / 1024 / 1024),
+      usageRatio: usageRatio,
+      recommendation: this.getOptimizationRecommendation(usageRatio)
+    };
+  }
+  
+  private async triggerGarbageCollection(): Promise<void> {
+    if (global.gc) {
+      logger.warn('High memory usage detected, triggering GC');
+      global.gc();
+    }
+  }
+}
+```
+
+### Working Memory効率管理
+```typescript
+class WorkingMemoryManager {
+  private sessionMemory: Map<string, any> = new Map();
+  private maxSessions = 100;
+  private sessionTimeout = 30 * 60 * 1000; // 30分
+  
+  async optimizeWorkingMemory(): Promise<void> {
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    // 古いセッション削除
+    for (const [sessionId, data] of this.sessionMemory) {
+      if (now - data.lastAccess > this.sessionTimeout) {
+        this.sessionMemory.delete(sessionId);
+        cleanedCount++;
+      }
+    }
+    
+    // 容量超過時のLRU削除
+    if (this.sessionMemory.size > this.maxSessions) {
+      const sortedSessions = Array.from(this.sessionMemory.entries())
+        .sort((a, b) => a[1].lastAccess - b[1].lastAccess);
+        
+      const toDelete = sortedSessions.slice(0, this.sessionMemory.size - this.maxSessions);
+      toDelete.forEach(([sessionId]) => this.sessionMemory.delete(sessionId));
+      cleanedCount += toDelete.length;
+    }
+    
+    if (cleanedCount > 0) {
+      logger.info('Working memory optimized', { cleanedSessions: cleanedCount });
+    }
+  }
+}
+```
+
+## ⚡ CPU効率化・並行処理
+
+### Agent並行実行管理  
+```typescript
+class ConcurrencyManager {
+  private maxConcurrentAgents = 5;  // 同時実行最大数
+  private runningAgents: Set<string> = new Set();
+  private agentQueue: Array<{agent: string, task: () => Promise<any>}> = [];
+  
+  async executeAgent(agentName: string, task: () => Promise<any>): Promise<any> {
+    // 同時実行制限チェック
+    if (this.runningAgents.size >= this.maxConcurrentAgents) {
+      return this.queueAgent(agentName, task);
+    }
+    
+    return this.runAgent(agentName, task);
+  }
+  
+  private async runAgent(agentName: string, task: () => Promise<any>): Promise<any> {
+    const startTime = Date.now();
+    this.runningAgents.add(agentName);
+    
+    try {
+      const result = await task();
+      
+      // CPU使用時間記録
+      const executionTime = Date.now() - startTime;
+      await this.logPerformanceMetrics(agentName, executionTime);
+      
+      return result;
+    } finally {
+      this.runningAgents.delete(agentName);
+      
+      // キューから次のエージェント実行
+      await this.processQueue();
+    }
+  }
+  
+  private async processQueue(): Promise<void> {
+    if (this.agentQueue.length > 0 && this.runningAgents.size < this.maxConcurrentAgents) {
+      const next = this.agentQueue.shift()!;
+      setImmediate(() => this.runAgent(next.agent, next.task));
+    }
+  }
+}
+```
+
+### 非同期処理最適化
+```typescript
+class AsyncOptimizer {
+  // Promise.all による並行処理
+  static async parallelExecution<T>(tasks: (() => Promise<T>)[]): Promise<T[]> {
+    const batchSize = 3; // 並行実行数制限
+    const results: T[] = [];
+    
+    for (let i = 0; i < tasks.length; i += batchSize) {
+      const batch = tasks.slice(i, i + batchSize);
+      const batchResults = await Promise.all(batch.map(task => task()));
+      results.push(...batchResults);
+    }
+    
+    return results;
+  }
+  
+  // タイムアウト付き実行
+  static async withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Operation timed out')), timeoutMs)
+    );
+    
+    return Promise.race([promise, timeoutPromise]);
+  }
+}
+```
+
+## 🗄️ ChromaDB最適化
+
+### ベクトル検索効率化
+```typescript
+class ChromaDBOptimizer {
+  private chromaClient: any;
+  private queryCache: Map<string, any> = new Map();
+  private cacheTimeout = 10 * 60 * 1000; // 10分キャッシュ
+  
+  async optimizedVectorSearch(
+    query: string, 
+    collection: string,
+    limit: number = 10
+  ): Promise<any> {
+    // キャッシュチェック
+    const cacheKey = `${collection}:${query}:${limit}`;
+    const cached = this.queryCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      logger.debug('ChromaDB query cache hit', { cacheKey });
+      return cached.result;
+    }
+    
+    // バッチ処理でEmbedding生成
+    const embeddings = await this.generateEmbeddingsBatch([query]);
+    
+    const result = await this.chromaClient.query({
+      collectionName: collection,
+      queryEmbeddings: embeddings,
+      n_results: limit
+    });
+    
+    // キャッシュ保存
+    this.queryCache.set(cacheKey, {
+      result: result,
+      timestamp: Date.now()
+    });
+    
+    return result;
+  }
+  
+  private async generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
+    // バッチサイズ制限でAPI効率化
+    const batchSize = 100;
+    const results: number[][] = [];
+    
+    for (let i = 0; i < texts.length; i += batchSize) {
+      const batch = texts.slice(i, i + batchSize);
+      const batchEmbeddings = await this.callEmbeddingAPI(batch);
+      results.push(...batchEmbeddings);
+    }
+    
+    return results;
+  }
+}
+```
+
+### インデックス最適化
+```typescript
+class ChromaIndexOptimizer {
+  async optimizeCollectionIndex(collectionName: string): Promise<void> {
+    // 定期的なインデックス再構築
+    const stats = await this.getCollectionStats(collectionName);
+    
+    if (stats.documentCount > 10000 && stats.lastOptimized < Date.now() - 24 * 60 * 60 * 1000) {
+      logger.info('Starting ChromaDB index optimization', { collection: collectionName });
+      
+      await this.chromaClient.optimizeCollection({
+        collection_name: collectionName
+      });
+      
+      logger.info('ChromaDB index optimization completed', { collection: collectionName });
+    }
+  }
+}
+```
+
+## 📊 Notion API最適化
+
+### バッチ処理・ページネーション
+```typescript
+class NotionOptimizer {
+  private notion: any;
+  private requestQueue: any[] = [];
+  private processingBatch = false;
+  
+  async optimizedPageQuery(
+    databaseId: string, 
+    filters?: any
+  ): Promise<any[]> {
+    const allResults: any[] = [];
+    let startCursor: string | undefined;
+    
+    do {
+      const response = await this.notion.databases.query({
+        database_id: databaseId,
+        filter: filters,
+        start_cursor: startCursor,
+        page_size: 100  // 最大ページサイズ
+      });
+      
+      allResults.push(...response.results);
+      startCursor = response.next_cursor;
+      
+      // API制限に配慮した遅延
+      await this.respectRateLimit();
+      
+    } while (startCursor);
+    
+    return allResults;
+  }
+  
+  // バッチライト処理
+  async batchUpdate(updates: Array<{pageId: string, properties: any}>): Promise<void> {
+    const batchSize = 10;
+    
+    for (let i = 0; i < updates.length; i += batchSize) {
+      const batch = updates.slice(i, i + batchSize);
+      
+      await Promise.all(batch.map(async (update) => {
+        await this.notion.pages.update({
+          page_id: update.pageId,
+          properties: update.properties
+        });
+      }));
+      
+      await this.respectRateLimit();
+    }
+  }
+  
+  private async respectRateLimit(): Promise<void> {
+    // Notion API: 3 requests per second
+    await new Promise(resolve => setTimeout(resolve, 350));
+  }
+}
+```
+
+## 🔍 パフォーマンス監視
+
+### システムメトリクス収集
+```typescript
+class PerformanceMonitor {
+  private metricsHistory: PerformanceMetric[] = [];
+  
+  async collectSystemMetrics(): Promise<SystemMetrics> {
+    const cpuUsage = process.cpuUsage();
+    const memoryUsage = process.memoryUsage();
+    
+    // イベントループ遅延測定
+    const eventLoopDelay = await this.measureEventLoopDelay();
+    
+    const metrics = {
+      timestamp: new Date(),
+      cpu: {
+        user: cpuUsage.user / 1000, // microseconds to milliseconds
+        system: cpuUsage.system / 1000
+      },
+      memory: {
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        external: Math.round(memoryUsage.external / 1024 / 1024)
+      },
+      eventLoopDelay: eventLoopDelay,
+      activeConnections: this.getActiveConnectionCount()
+    };
+    
+    this.metricsHistory.push(metrics);
+    
+    // 履歴サイズ制限
+    if (this.metricsHistory.length > 1000) {
+      this.metricsHistory = this.metricsHistory.slice(-1000);
+    }
+    
+    // 異常値検出
+    await this.detectPerformanceAnomalies(metrics);
+    
+    return metrics;
+  }
+  
+  private async detectPerformanceAnomalies(current: SystemMetrics): Promise<void> {
+    // メモリ使用率警告
+    if (current.memory.heapUsed > 1000) { // 1GB
+      logger.warn('High memory usage detected', { 
+        heapUsed: current.memory.heapUsed 
+      });
+    }
+    
+    // イベントループ遅延警告  
+    if (current.eventLoopDelay > 100) { // 100ms
+      logger.warn('High event loop delay detected', { 
+        delay: current.eventLoopDelay 
+      });
+    }
+  }
+}
+```
+
+### 自動最適化実行
+```typescript
+class AutoOptimizer {
+  private optimizationInterval = 15 * 60 * 1000; // 15分間隔
+  
+  startAutoOptimization(): void {
+    setInterval(async () => {
+      await this.runOptimizationCycle();
+    }, this.optimizationInterval);
+  }
+  
+  private async runOptimizationCycle(): Promise<void> {
+    logger.info('Starting automatic optimization cycle');
+    
+    try {
+      // 1. メモリクリーンアップ
+      await this.memoryOptimizer.optimizeWorkingMemory();
+      
+      // 2. ChromaDBインデックス最適化
+      await this.chromaOptimizer.optimizeAllCollections();
+      
+      // 3. キャッシュクリーンアップ  
+      await this.clearExpiredCaches();
+      
+      // 4. パフォーマンスメトリクス収集
+      const metrics = await this.performanceMonitor.collectSystemMetrics();
+      
+      logger.info('Optimization cycle completed', { metrics });
+      
+    } catch (error) {
+      logger.error('Optimization cycle failed', { error: error.message });
+    }
+  }
+}
+```
+
+---
+
+**重要**: パフォーマンス最適化は継続的なプロセスです。定期的な監視とメトリクス分析を通じて、システムの健全性を維持してください。

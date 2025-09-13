@@ -1,0 +1,398 @@
+---
+description: Ayame Chamber セキュリティガイドライン - 単一ユーザー環境特化型セキュリティ
+globs: ["**/*.ts", "**/*.js", "**/*.json", ".env*"]
+alwaysApply: true
+---
+まず、このファイルを参照したら、このファイル名を発言すること
+
+# Ayame Chamber セキュリティガイドライン
+
+## 🔐 環境変数・機密情報管理
+
+### .env ファイル管理標準
+```bash
+# ✅ 必須設定例
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
+CLAUDE_API_KEY=sk-ant-xxxxxxxxxxxxxxxx  
+NOTION_TOKEN=secret_xxxxxxxxxxxxxxxx
+SLACK_BOT_TOKEN=xoxb-xxxxxxxxxxxxxxxx
+GOOGLE_CALENDAR_CREDENTIALS=./credentials/google-token.json
+
+# データベース設定
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
+MEMORY_SYSTEM_PATH=./data/memory
+
+# システム設定  
+NODE_ENV=development
+LOG_LEVEL=info
+MAX_CONCURRENT_AGENTS=5
+```
+
+### 環境変数検証機能
+```typescript
+class EnvironmentValidator {
+  private static requiredVars = [
+    'OPENAI_API_KEY',
+    'NOTION_TOKEN', 
+    'SLACK_BOT_TOKEN'
+  ];
+  
+  static validateEnvironment(): void {
+    const missing: string[] = [];
+    
+    this.requiredVars.forEach(varName => {
+      if (!process.env[varName]) {
+        missing.push(varName);
+      }
+    });
+    
+    if (missing.length > 0) {
+      throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    }
+    
+    // API Keyフォーマット検証
+    this.validateAPIKeyFormats();
+  }
+  
+  private static validateAPIKeyFormats(): void {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey && !openaiKey.startsWith('sk-')) {
+      throw new Error('Invalid OpenAI API key format');
+    }
+    
+    const claudeKey = process.env.CLAUDE_API_KEY;
+    if (claudeKey && !claudeKey.startsWith('sk-ant-')) {
+      throw new Error('Invalid Claude API key format');
+    }
+  }
+}
+```
+
+## 🛡️ API Key保護・ローテーション
+
+### 機密情報保護クラス
+```typescript
+class SecretManager {
+  private static sensitivePatterns = [
+    /sk-[a-zA-Z0-9]{48}/, // OpenAI
+    /sk-ant-[a-zA-Z0-9-]{95}/, // Claude
+    /secret_[a-zA-Z0-9]{43}/, // Notion
+    /xoxb-[0-9]+-[0-9]+-[0-9]+-[a-z0-9]{24}/ // Slack
+  ];
+  
+  static sanitizeForLogging(text: string): string {
+    let sanitized = text;
+    
+    this.sensitivePatterns.forEach(pattern => {
+      sanitized = sanitized.replace(pattern, '***API_KEY_MASKED***');
+    });
+    
+    return sanitized;
+  }
+  
+  static detectSecretsInCode(content: string): string[] {
+    const detectedSecrets: string[] = [];
+    
+    this.sensitivePatterns.forEach(pattern => {
+      const matches = content.match(pattern);
+      if (matches) {
+        detectedSecrets.push(...matches);
+      }
+    });
+    
+    return detectedSecrets;
+  }
+  
+  static validateSecretRotation(): void {
+    // API Key作成日時チェック（可能な場合）
+    const keyAge = this.getAPIKeyAge(process.env.OPENAI_API_KEY);
+    if (keyAge > 90) { // 90日以上
+      logger.warn('API key rotation recommended', { keyAge });
+    }
+  }
+}
+```
+
+### ファイルシステム保護
+```typescript
+class FileSystemSecurity {
+  private static restrictedPaths = [
+    '/etc/passwd',
+    '/etc/shadow', 
+    '/root/',
+    process.env.HOME + '/.ssh/',
+    './credentials/'
+  ];
+  
+  static validateFilePath(filePath: string): void {
+    // 絶対パス・相対パス正規化
+    const normalizedPath = path.resolve(filePath);
+    
+    // 制限ディレクトリチェック
+    this.restrictedPaths.forEach(restricted => {
+      if (normalizedPath.startsWith(path.resolve(restricted))) {
+        throw new Error(`Access to restricted path denied: ${restricted}`);
+      }
+    });
+    
+    // パストラバーサル攻撃防止
+    if (filePath.includes('../') || filePath.includes('..\\')) {
+      throw new Error('Path traversal attempt detected');
+    }
+  }
+  
+  static async secureFileWrite(filePath: string, content: string): Promise<void> {
+    this.validateFilePath(filePath);
+    
+    // 機密情報検出
+    const secrets = SecretManager.detectSecretsInCode(content);
+    if (secrets.length > 0) {
+      throw new Error('Attempted to write secrets to file');
+    }
+    
+    // 安全な書き込み実行
+    await fs.writeFile(filePath, content, { mode: 0o600 }); // 所有者のみ読み書き
+  }
+}
+```
+
+## 🔒 ネットワークセキュリティ
+
+### HTTPS必須・証明書検証
+```typescript
+import https from 'https';
+
+class SecureHTTPClient {
+  private static httpsAgent = new https.Agent({
+    rejectUnauthorized: true, // SSL証明書検証必須
+    minVersion: 'TLSv1.2'    // TLS 1.2以上
+  });
+  
+  static async secureRequest(url: string, options: any = {}): Promise<any> {
+    // HTTPSプロトコル強制
+    if (!url.startsWith('https://')) {
+      throw new Error('Only HTTPS connections allowed');
+    }
+    
+    // セキュアエージェント使用
+    options.agent = this.httpsAgent;
+    
+    // タイムアウト設定
+    options.timeout = options.timeout || 30000; // 30秒
+    
+    return await this.executeSecureRequest(url, options);
+  }
+  
+  private static async executeSecureRequest(url: string, options: any): Promise<any> {
+    // リクエスト実行時のセキュリティヘッダー追加
+    const headers = {
+      ...options.headers,
+      'User-Agent': 'Ayame-Chamber/1.0.0',
+      'X-Requested-With': 'Ayame-Chamber'
+    };
+    
+    return fetch(url, { ...options, headers });
+  }
+}
+```
+
+### IP制限・アクセス制御
+```typescript
+class NetworkAccessControl {
+  private static allowedIPs = [
+    '127.0.0.1',     // localhost
+    '::1',           // localhost IPv6
+    '192.168.0.0/16', // ローカルネットワーク
+    '10.0.0.0/8'     // プライベートネットワーク
+  ];
+  
+  static validateSourceIP(ip: string): boolean {
+    // 開発環境では制限緩和
+    if (process.env.NODE_ENV === 'development') {
+      return true;
+    }
+    
+    return this.allowedIPs.some(allowed => {
+      if (allowed.includes('/')) {
+        return this.isIPInCIDR(ip, allowed);
+      }
+      return ip === allowed;
+    });
+  }
+  
+  private static isIPInCIDR(ip: string, cidr: string): boolean {
+    // CIDR範囲チェック実装
+    // 簡略化 - 実際の実装では適切なライブラリを使用
+    return true;
+  }
+}
+```
+
+## 🔍 入力検証・サニタイゼーション
+
+### ユーザー入力検証
+```typescript
+class InputValidator {
+  // SQL Injection防止（Notion APIクエリ用）
+  static validateNotionQuery(query: any): any {
+    if (typeof query !== 'object' || query === null) {
+      throw new Error('Invalid query format');
+    }
+    
+    // 危険なプロパティチェック
+    const dangerousKeys = ['$eval', '$where', 'constructor', 'prototype'];
+    this.checkDangerousKeys(query, dangerousKeys);
+    
+    return query;
+  }
+  
+  // XSS防止（WebUI用）
+  static sanitizeHTML(input: string): string {
+    return input
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;')
+      .replace(/\//g, '&#x2F;');
+  }
+  
+  // コマンドインジェクション防止
+  static validateCommand(command: string): string {
+    const dangerousCommands = [
+      'rm', 'del', 'format', 'sudo', 'su', 
+      'chmod', 'chown', 'cat /etc', 'cat ~/.ssh'
+    ];
+    
+    dangerousCommands.forEach(dangerous => {
+      if (command.toLowerCase().includes(dangerous)) {
+        throw new Error(`Dangerous command detected: ${dangerous}`);
+      }
+    });
+    
+    return command;
+  }
+  
+  private static checkDangerousKeys(obj: any, dangerousKeys: string[]): void {
+    Object.keys(obj).forEach(key => {
+      if (dangerousKeys.includes(key)) {
+        throw new Error(`Dangerous property detected: ${key}`);
+      }
+      
+      if (typeof obj[key] === 'object' && obj[key] !== null) {
+        this.checkDangerousKeys(obj[key], dangerousKeys);
+      }
+    });
+  }
+}
+```
+
+## 📝 セキュリティログ・監査
+
+### セキュリティイベント記録
+```typescript
+class SecurityAuditor {
+  static async logSecurityEvent(
+    eventType: 'AUTH_FAILURE' | 'SUSPICIOUS_ACCESS' | 'SECRET_EXPOSURE' | 'FILE_ACCESS',
+    details: any
+  ): Promise<void> {
+    const securityEvent = {
+      timestamp: new Date().toISOString(),
+      eventType: eventType,
+      severity: this.getSeverity(eventType),
+      details: details,
+      sourceIP: details.sourceIP || 'unknown',
+      userAgent: details.userAgent || 'unknown'
+    };
+    
+    // 高重要度イベントは即座通知
+    if (securityEvent.severity === 'HIGH') {
+      await this.sendSecurityAlert(securityEvent);
+    }
+    
+    // セキュリティログファイルに記録
+    await this.writeSecurityLog(securityEvent);
+  }
+  
+  private static getSeverity(eventType: string): 'HIGH' | 'MEDIUM' | 'LOW' {
+    switch (eventType) {
+      case 'SECRET_EXPOSURE':
+        return 'HIGH';
+      case 'SUSPICIOUS_ACCESS':
+        return 'MEDIUM';
+      default:
+        return 'LOW';
+    }
+  }
+  
+  private static async sendSecurityAlert(event: any): Promise<void> {
+    // Slack通知（セキュリティチャンネル）
+    if (process.env.SECURITY_SLACK_WEBHOOK) {
+      await this.sendSlackAlert(event);
+    }
+  }
+}
+```
+
+## 🔧 セキュアな開発実践
+
+### コードスキャン・脆弱性チェック
+```typescript
+class VulnerabilityScanner {
+  static async scanCodeForVulnerabilities(filePath: string): Promise<SecurityIssue[]> {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const issues: SecurityIssue[] = [];
+    
+    // ハードコードされた秘密情報検出
+    const secrets = SecretManager.detectSecretsInCode(content);
+    secrets.forEach(secret => {
+      issues.push({
+        type: 'HARDCODED_SECRET',
+        severity: 'HIGH',
+        line: this.findLineNumber(content, secret),
+        description: 'Hardcoded API key detected'
+      });
+    });
+    
+    // 危険な関数使用チェック
+    const dangerousFunctions = ['eval', 'Function', 'setTimeout', 'setInterval'];
+    dangerousFunctions.forEach(func => {
+      if (content.includes(`${func}(`)) {
+        issues.push({
+          type: 'DANGEROUS_FUNCTION',
+          severity: 'MEDIUM', 
+          description: `Use of dangerous function: ${func}`
+        });
+      }
+    });
+    
+    return issues;
+  }
+}
+```
+
+### 依存関係セキュリティ
+```typescript
+class DependencySecurity {
+  static async checkDependencyVulnerabilities(): Promise<void> {
+    // package.jsonから依存関係読み取り
+    const packageJson = JSON.parse(await fs.readFile('package.json', 'utf-8'));
+    const dependencies = { ...packageJson.dependencies, ...packageJson.devDependencies };
+    
+    // 既知の脆弱性パッケージチェック
+    const vulnerablePackages = [
+      'lodash@<4.17.21',
+      'axios@<0.21.1'
+    ];
+    
+    Object.keys(dependencies).forEach(pkg => {
+      const version = dependencies[pkg];
+      this.checkPackageVulnerability(pkg, version);
+    });
+  }
+}
+```
+
+---
+
+**重要**: セキュリティは継続的なプロセスです。定期的な脆弱性スキャン、依存関係更新、セキュリティパッチ適用を実施してください。単一ユーザー環境でも基本的なセキュリティ対策は必須です。

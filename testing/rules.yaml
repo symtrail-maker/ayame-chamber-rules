@@ -1,0 +1,458 @@
+---
+description: Ayame Chamber テスト戦略・品質保証標準 - Jest・QC1-4統合テストフレームワーク
+globs: ["**/*.test.ts", "**/*.spec.ts", "src/**/*.ts"]
+alwaysApply: false
+dependencies:
+  - aidd-cycle.mdc      # AIDDサイクルに依存（品質評価プロセス）
+  - git-workflow.mdc    # Git運用ルールに依存（コミット管理）
+category: quality
+priority: HIGH
+---
+まず、このファイルを参照したら、このファイル名を発言すること
+
+# Ayame Chamber テスト戦略・品質保証標準
+
+## 🧪 Jest単体テスト標準
+
+### 基本テスト構成
+```typescript
+import { BaseAgent } from '../agents/base-agent';
+import { QualityController } from '../core/qc-gateway';
+
+describe('BaseAgent', () => {
+  let agent: BaseAgent;
+  let mockQualityController: jest.Mocked<QualityController>;
+  
+  beforeEach(() => {
+    mockQualityController = {
+      performQC1Assessment: jest.fn(),
+      performQC2Assessment: jest.fn(), 
+      performQC3Assessment: jest.fn(),
+      performQC4Assessment: jest.fn()
+    } as any;
+    
+    agent = new BaseAgent();
+    agent.qualityController = mockQualityController;
+  });
+  
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+  
+  describe('executeTask', () => {
+    it('should execute task successfully with quality check', async () => {
+      // Arrange
+      const input = { query: 'test query', context: 'test context' };
+      const expectedOutput = { result: 'test result', confidence: 0.9 };
+      
+      mockQualityController.performQC1Assessment.mockResolvedValue(8);
+      mockQualityController.performQC2Assessment.mockResolvedValue(7);
+      mockQualityController.performQC3Assessment.mockResolvedValue(6);
+      mockQualityController.performQC4Assessment.mockResolvedValue(5);
+      
+      // Act
+      const result = await agent.executeTask(input);
+      
+      // Assert
+      expect(result).toBeDefined();
+      expect(mockQualityController.performQC1Assessment).toHaveBeenCalledWith(input);
+      expect(result.qualityScore.totalScore).toBe(26); // 8+7+6+5
+    });
+    
+    it('should handle low quality score appropriately', async () => {
+      // 品質スコア不足のテスト
+      mockQualityController.performQC1Assessment.mockResolvedValue(2);
+      mockQualityController.performQC2Assessment.mockResolvedValue(3);
+      mockQualityController.performQC3Assessment.mockResolvedValue(4);
+      mockQualityController.performQC4Assessment.mockResolvedValue(5);
+      
+      const input = { query: 'poor quality input' };
+      const result = await agent.executeTask(input);
+      
+      expect(result.qualityScore.totalScore).toBe(14); // 15未満で品質不足
+      expect(result.requiresImprovement).toBe(true);
+    });
+  });
+});
+```
+
+### エージェント別テストパターン
+```typescript
+// リサーチエージェントテスト例
+describe('WebResearchAgent', () => {
+  let webAgent: WebResearchAgent;
+  let mockWebClient: jest.Mocked<WebClient>;
+  
+  beforeEach(() => {
+    mockWebClient = {
+      search: jest.fn(),
+      fetchContent: jest.fn()
+    } as any;
+    
+    webAgent = new WebResearchAgent();
+    webAgent.webClient = mockWebClient;
+  });
+  
+  describe('research', () => {
+    it('should perform web research with API rate limiting', async () => {
+      // API制限テスト
+      mockWebClient.search.mockResolvedValue([
+        { url: 'https://example.com', title: 'Test Article' }
+      ]);
+      
+      const query = 'AI development trends 2025';
+      const result = await webAgent.research(query);
+      
+      expect(mockWebClient.search).toHaveBeenCalledWith(query);
+      expect(result.sources).toHaveLength(1);
+      expect(result.rateLimitCompliant).toBe(true);
+    });
+    
+    it('should handle API errors gracefully', async () => {
+      mockWebClient.search.mockRejectedValue(new Error('API rate limit exceeded'));
+      
+      const query = 'test query';
+      const result = await webAgent.research(query);
+      
+      expect(result.error).toBeDefined();
+      expect(result.fallbackStrategy).toBe('cached_results');
+    });
+  });
+});
+```
+
+## 🔗 QC1-4品質評価統合テスト
+
+### 品質評価テストスイート
+```typescript
+describe('QC1-4 Quality Assessment Integration', () => {
+  let qualityGateway: QCGateway;
+  
+  beforeEach(() => {
+    qualityGateway = new QCGateway();
+  });
+  
+  describe('QC1: Information Accuracy', () => {
+    it('should assess factual accuracy correctly', async () => {
+      const testData = {
+        content: 'Tokyo is the capital of Japan',
+        sources: ['reliable-source.com'],
+        factChecked: true
+      };
+      
+      const qc1Score = await qualityGateway.performQC1Assessment(testData);
+      
+      expect(qc1Score).toBeGreaterThanOrEqual(8); // 高い正確性
+      expect(qc1Score).toBeLessThanOrEqual(10);
+    });
+    
+    it('should detect inaccurate information', async () => {
+      const testData = {
+        content: 'Paris is the capital of Germany',
+        sources: ['questionable-source.com'],
+        factChecked: false
+      };
+      
+      const qc1Score = await qualityGateway.performQC1Assessment(testData);
+      
+      expect(qc1Score).toBeLessThanOrEqual(3); // 低い正確性
+    });
+  });
+  
+  describe('QC2: Relevance', () => {
+    it('should assess query relevance accurately', async () => {
+      const query = 'AI development tools';
+      const response = 'Here are the top AI development frameworks: TensorFlow, PyTorch...';
+      
+      const qc2Score = await qualityGateway.performQC2Assessment(query, response);
+      
+      expect(qc2Score).toBeGreaterThanOrEqual(7);
+    });
+  });
+  
+  describe('QC3: Completeness', () => {
+    it('should evaluate response completeness', async () => {
+      const requirements = ['introduction', 'main_points', 'conclusion', 'sources'];
+      const response = {
+        introduction: 'Present',
+        main_points: ['Point 1', 'Point 2', 'Point 3'],
+        conclusion: 'Present', 
+        sources: ['Source 1', 'Source 2']
+      };
+      
+      const qc3Score = await qualityGateway.performQC3Assessment(requirements, response);
+      
+      expect(qc3Score).toBe(8); // 全要素完備
+    });
+  });
+  
+  describe('QC4: Usefulness', () => {
+    it('should assess practical usefulness', async () => {
+      const context = 'software development project';
+      const response = 'Step-by-step implementation guide with code examples';
+      
+      const qc4Score = await qualityGateway.performQC4Assessment(context, response);
+      
+      expect(qc4Score).toBeGreaterThanOrEqual(6);
+    });
+  });
+});
+```
+
+## 🤖 エージェント統合テスト
+
+### 56エージェント体制テスト
+```typescript
+describe('Agent Integration Tests', () => {
+  let orchestrator: Orchestrator;
+  let routerAgent: BaseRouterAgent;
+  
+  beforeEach(async () => {
+    orchestrator = new Orchestrator();
+    routerAgent = new BaseRouterAgent();
+    await orchestrator.initialize();
+  });
+  
+  describe('Multi-Agent Workflow', () => {
+    it('should execute research -> planning -> implementation workflow', async () => {
+      const task = {
+        type: 'full_development_cycle',
+        description: 'Create a new AI feature',
+        requirements: ['research', 'planning', 'implementation']
+      };
+      
+      // 研究フェーズ
+      const researchResult = await orchestrator.executeAgent('WebResearchAgent', {
+        query: 'AI feature implementation best practices'
+      });
+      
+      // 企画フェーズ  
+      const planningResult = await orchestrator.executeAgent('PlanningAgent', {
+        researchData: researchResult,
+        requirements: task.requirements
+      });
+      
+      // 実装フェーズ
+      const implementationResult = await orchestrator.executeAgent('CodeImplementationAgent', {
+        plan: planningResult,
+        specifications: planningResult.specifications
+      });
+      
+      expect(researchResult.qualityScore.totalScore).toBeGreaterThanOrEqual(15);
+      expect(planningResult.qualityScore.totalScore).toBeGreaterThanOrEqual(15);  
+      expect(implementationResult.qualityScore.totalScore).toBeGreaterThanOrEqual(15);
+      expect(implementationResult.code).toBeDefined();
+    });
+  });
+  
+  describe('Error Propagation & Recovery', () => {
+    it('should handle agent failures gracefully', async () => {
+      // エージェント障害シミュレーション
+      const mockFailingAgent = jest.fn().mockRejectedValue(new Error('Agent failure'));
+      orchestrator.registerAgent('FailingAgent', mockFailingAgent);
+      
+      const result = await orchestrator.executeAgent('FailingAgent', { test: true });
+      
+      expect(result.error).toBeDefined();
+      expect(result.recoveryAction).toBe('fallback_agent_used');
+      expect(result.fallbackResult).toBeDefined();
+    });
+  });
+});
+```
+
+## 📊 パフォーマンステスト
+
+### 負荷テスト・同時実行テスト
+```typescript
+describe('Performance Tests', () => {
+  describe('Concurrent Agent Execution', () => {
+    it('should handle multiple agents concurrently without degradation', async () => {
+      const concurrentTasks = Array.from({ length: 10 }, (_, i) => ({
+        agentName: `TestAgent${i}`,
+        task: async () => {
+          await new Promise(resolve => setTimeout(resolve, 100)); // 100ms処理
+          return { result: `Result ${i}`, executionTime: 100 };
+        }
+      }));
+      
+      const startTime = Date.now();
+      const results = await Promise.all(
+        concurrentTasks.map(task => orchestrator.executeAgent(task.agentName, task.task))
+      );
+      const totalTime = Date.now() - startTime;
+      
+      // 並行実行により総時間は大幅短縮されるべき
+      expect(totalTime).toBeLessThan(500); // 1000msより大幅に短い
+      expect(results).toHaveLength(10);
+      results.forEach(result => {
+        expect(result.error).toBeUndefined();
+      });
+    });
+  });
+  
+  describe('Memory Usage', () => {
+    it('should maintain stable memory usage during long operations', async () => {
+      const initialMemory = process.memoryUsage().heapUsed;
+      
+      // 長時間実行シミュレーション
+      for (let i = 0; i < 100; i++) {
+        await orchestrator.executeAgent('MemoryTestAgent', {
+          data: Array.from({ length: 1000 }, (_, j) => `data-${j}`)
+        });
+      }
+      
+      // ガベージコレクション実行
+      if (global.gc) global.gc();
+      
+      const finalMemory = process.memoryUsage().heapUsed;
+      const memoryIncrease = finalMemory - initialMemory;
+      
+      // メモリ増加は10MB以下であるべき
+      expect(memoryIncrease).toBeLessThan(10 * 1024 * 1024);
+    });
+  });
+});
+```
+
+## 🗄️ データベース・API統合テスト  
+
+### ChromaDB・Notion API テスト
+```typescript
+describe('Database Integration Tests', () => {
+  describe('ChromaDB Integration', () => {
+    let chromaClient: ChromaDB;
+    
+    beforeEach(async () => {
+      chromaClient = new ChromaDB();
+      await chromaClient.initialize();
+    });
+    
+    afterEach(async () => {
+      await chromaClient.cleanup();
+    });
+    
+    it('should perform vector search efficiently', async () => {
+      // テストデータ挿入
+      await chromaClient.collection.add({
+        documents: ['AI development', 'Machine learning', 'Neural networks'],
+        ids: ['doc1', 'doc2', 'doc3']
+      });
+      
+      const startTime = Date.now();
+      const results = await chromaClient.search('artificial intelligence', 2);
+      const searchTime = Date.now() - startTime;
+      
+      expect(results).toBeDefined();
+      expect(results.length).toBeLessThanOrEqual(2);
+      expect(searchTime).toBeLessThan(1000); // 1秒以内
+    });
+  });
+  
+  describe('Notion API Integration', () => {
+    let notionService: NotionService;
+    
+    beforeEach(() => {
+      notionService = new NotionService();
+    });
+    
+    it('should respect API rate limits', async () => {
+      const requests = Array.from({ length: 5 }, (_, i) => 
+        notionService.createPage('test-database-id', {
+          title: { title: [{ text: { content: `Test Page ${i}` } }] }
+        })
+      );
+      
+      const startTime = Date.now();
+      await Promise.all(requests);
+      const totalTime = Date.now() - startTime;
+      
+      // レート制限により最低限の時間がかかるはず
+      expect(totalTime).toBeGreaterThan(1000); // 1秒以上
+    });
+  });
+});
+```
+
+## 🔍 品質回帰テスト
+
+### 自動品質回帰検出
+```typescript
+describe('Quality Regression Tests', () => {
+  const baselineScores = {
+    WebResearchAgent: { qc1: 8, qc2: 7, qc3: 6, qc4: 6 },
+    PlanningAgent: { qc1: 7, qc2: 8, qc3: 7, qc4: 7 },
+    MarketingAgent: { qc1: 6, qc2: 8, qc3: 6, qc4: 8 }
+  };
+  
+  Object.entries(baselineScores).forEach(([agentName, baseline]) => {
+    describe(agentName, () => {
+      it('should maintain quality score baseline', async () => {
+        const agent = orchestrator.getAgent(agentName);
+        const testInput = getStandardTestInput(agentName);
+        
+        const result = await agent.executeTask(testInput);
+        const scores = result.qualityScore;
+        
+        expect(scores.qc1Score).toBeGreaterThanOrEqual(baseline.qc1 - 1); // -1の許容差
+        expect(scores.qc2Score).toBeGreaterThanOrEqual(baseline.qc2 - 1);
+        expect(scores.qc3Score).toBeGreaterThanOrEqual(baseline.qc3 - 1);
+        expect(scores.qc4Score).toBeGreaterThanOrEqual(baseline.qc4 - 1);
+      });
+    });
+  });
+});
+```
+
+## 📈 継続的品質監視
+
+### 自動テスト実行・レポート
+```typescript
+class QualityMonitor {
+  async runDailyQualityCheck(): Promise<QualityReport> {
+    const report: QualityReport = {
+      date: new Date(),
+      agentScores: new Map(),
+      overallHealth: 'UNKNOWN',
+      issues: []
+    };
+    
+    // 全エージェントの品質チェック
+    for (const agentName of this.getAllAgentNames()) {
+      try {
+        const score = await this.runAgentQualityTest(agentName);
+        report.agentScores.set(agentName, score);
+        
+        if (score.totalScore < 15) {
+          report.issues.push({
+            agent: agentName,
+            issue: 'Quality score below threshold',
+            severity: 'HIGH'
+          });
+        }
+      } catch (error) {
+        report.issues.push({
+          agent: agentName,
+          issue: `Test execution failed: ${error.message}`,
+          severity: 'CRITICAL'
+        });
+      }
+    }
+    
+    // 全体健全性評価
+    report.overallHealth = this.calculateOverallHealth(report);
+    
+    // レポート保存・通知
+    await this.saveQualityReport(report);
+    if (report.overallHealth === 'POOR') {
+      await this.sendQualityAlert(report);
+    }
+    
+    return report;
+  }
+}
+```
+
+---
+
+**重要**: テストは開発プロセスの核心です。すべての新機能・変更に対して適切なテストを作成し、品質回帰を防ぐため継続的に実行してください。
